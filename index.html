@@ -1,0 +1,341 @@
+
+
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<meta name="theme-color" content="#102c4c">
+
+<title>Midway | UniFi Switch Sizer</title>
+
+<link rel="manifest" href="manifest.json">
+
+<style>
+
+:root{font-family:system-ui,-apple-system,sans-serif;color-scheme:dark}
+
+*{box-sizing:border-box}
+
+body{margin:0;background:#0b1422;color:#eef4ff}
+
+main{max-width:760px;margin:auto;padding:22px 16px 50px}
+
+h1{font-size:27px;margin:6px 0}
+
+h2{font-size:19px;margin:0 0 15px}
+
+p{color:#a9b9cf;line-height:1.5}
+
+.panel{background:#15243a;border:1px solid #30445f;border-radius:15px;padding:19px;margin:18px 0}
+
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+
+label{font-size:14px;color:#c5d3e6}
+
+input[type=number]{width:100%;margin-top:7px;padding:13px;border-radius:9px;border:1px solid #526784;background:#0b1422;color:white;font-size:21px}
+
+.check{display:flex;align-items:center;gap:10px;margin-top:19px}
+
+.check input{width:20px;height:20px}
+
+.result{background:#183a39;border-color:#347c72}
+
+.big{font-size:27px;font-weight:800;color:#7df0bf;margin:8px 0}
+
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-top:18px}
+
+.value{font-size:22px;font-weight:750;margin-top:5px}
+
+small{color:#a9b9cf}
+
+.track{height:13px;border-radius:9px;background:#32465c;overflow:hidden;margin-top:18px}
+
+.fill{height:100%;width:0;background:#40c59a;transition:width .2s}
+
+table{width:100%;border-collapse:collapse;font-size:13px}
+
+th,td{text-align:left;padding:11px 7px;border-bottom:1px solid #30445f}
+
+th{color:#a9b9cf}
+
+.good{color:#7df0bf}
+
+.bad{color:#f2a7a7}
+
+button{padding:12px 16px;border-radius:9px;border:1px solid #526784;background:#243b59;color:white;font-weight:700}
+
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+
+.note{font-size:12px}
+
+@media(min-width:600px){.grid{grid-template-columns:repeat(4,1fr)}}
+
+</style>
+
+</head>
+
+<body>
+
+<main>
+
+<header>
+
+<small>MIDWAY NETWORK TOOLS</small>
+
+<h1>UniFi Switch Sizer</h1>
+
+<p>Enter your branch equipment to find the smallest suitable UniFi PoE switch.</p>
+
+</header>
+
+<section class="panel">
+
+<h2>Branch equipment</h2>
+
+<div class="grid">
+
+<label>Computers<input id="pcs" type="number" min="0" value="15"></label>
+
+<label>Phones<input id="phones" type="number" min="0" value="14"></label>
+
+<label>Access points<input id="aps" type="number" min="0" value="1"></label>
+
+<label>Printers<input id="printers" type="number" min="0" value="7"></label>
+
+</div>
+
+<label class="check">
+
+<input id="passthrough" type="checkbox" checked>
+
+Computers connect through phone Ethernet ports
+
+</label>
+
+<div class="actions">
+
+<button id="reset" type="button">Reset</button>
+
+</div>
+
+</section>
+
+<section class="panel result" aria-live="polite">
+
+<small>RECOMMENDED SWITCH</small>
+
+<div class="big" id="recommendation">Calculating...</div>
+
+<p id="reason"></p>
+
+<div class="stats">
+
+<div><small>Required ports</small><div class="value" id="ports">—</div></div>
+
+<div><small>PoE devices</small><div class="value" id="poeports">—</div></div>
+
+<div><small>Estimated PoE</small><div class="value" id="watts">—</div></div>
+
+<div><small>Power headroom</small><div class="value" id="headroom">—</div></div>
+
+</div>
+
+<div class="track"><div class="fill" id="bar"></div></div>
+
+<p class="note" id="powerdetail"></p>
+
+</section>
+
+<section class="panel">
+
+<h2>Switch comparison</h2>
+
+<div style="overflow-x:auto">
+
+<table>
+
+<thead><tr>
+
+<th>Switch</th><th>Ports</th><th>PoE ports</th><th>Budget</th><th>Status</th>
+
+</tr></thead>
+
+<tbody id="comparison"></tbody>
+
+</table>
+
+</div>
+
+</section>
+
+<p class="note">
+
+Planning assumptions: 7W per Yealink SIP-T44W phone,
+
+9W per UniFi U6+ AP, 20% reserved PoE capacity,
+
+and one switch port for the uplink. Computers and printers
+
+are assumed not to require PoE. Verify manufacturer-rated
+
+maximums and other connected equipment before purchasing.
+
+</p>
+
+</main>
+
+<script>
+
+const switches=[
+
+{name:"Standard 16 PoE",ports:16,poe:8,power:42},
+
+{name:"Standard 24 PoE",ports:24,poe:16,power:95},
+
+{name:"Standard 48 PoE",ports:48,poe:32,power:195},
+
+{name:"Pro 24 PoE",ports:24,poe:24,power:400},
+
+{name:"Pro 48 PoE",ports:48,poe:48,power:600}
+
+];
+
+const $=id=>document.getElementById(id);
+
+function count(id){
+
+const n=Number($(id).value);
+
+return Number.isFinite(n)?Math.max(0,Math.floor(n)):0;
+
+}
+
+function calculate(){
+
+const pcs=count("pcs"),phones=count("phones");
+
+const aps=count("aps"),printers=count("printers");
+
+const shared=$("passthrough").checked?Math.min(pcs,phones):0;
+
+const ports=pcs+phones+aps+printers+1-shared;
+
+const poe=phones+aps;
+
+const watts=phones*7+aps*9;
+
+const results=switches.map(s=>{
+
+const problems=[];
+
+if(ports>s.ports)problems.push("Ports");
+
+if(poe>s.poe)problems.push("PoE ports");
+
+if(watts>s.power*0.8)problems.push("Power");
+
+return {...s,problems,fit:problems.length===0};
+
+});
+
+const best=results.find(s=>s.fit);
+
+$("ports").textContent=ports;
+
+$("poeports").textContent=poe;
+
+$("watts").textContent=watts+" W";
+
+if(best){
+
+const usage=watts/best.power*100;
+
+$("recommendation").textContent=best.name;
+
+$("reason").textContent="Fits the required connections and retains at least 20% PoE headroom.";
+
+$("headroom").textContent=Math.round(100-usage)+"%";
+
+$("bar").style.width=usage+"%";
+
+$("powerdetail").textContent=watts+"W of "+best.power+"W PoE budget";
+
+}else{
+
+$("recommendation").textContent="Multiple switches required";
+
+$("reason").textContent="No single listed switch satisfies all requirements.";
+
+$("headroom").textContent="—";
+
+$("bar").style.width="0";
+
+$("powerdetail").textContent="Split the equipment across multiple switches.";
+
+}
+
+$("comparison").replaceChildren();
+
+results.forEach(s=>{
+
+const tr=document.createElement("tr");
+
+const values=[s.name,s.ports,s.poe,s.power+"W",
+
+s===best?"Recommended":s.fit?"Compatible":s.problems.join(", ")];
+
+values.forEach((v,i)=>{
+
+const td=document.createElement("td");
+
+td.textContent=v;
+
+if(i===4)td.className=s.fit?"good":"bad";
+
+tr.appendChild(td);
+
+});
+
+$("comparison").appendChild(tr);
+
+});
+
+}
+
+["pcs","phones","aps","printers"].forEach(id=>
+
+$(id).addEventListener("input",calculate));
+
+$("passthrough").addEventListener("change",calculate);
+
+$("reset").addEventListener("click",()=>{
+
+["pcs","phones","aps","printers"].forEach(id=>$(id).value=0);
+
+calculate();
+
+});
+
+if("serviceWorker" in navigator){
+
+window.addEventListener("load",()=>{
+
+navigator.serviceWorker.register("./sw.js").catch(()=>{});
+
+});
+
+}
+
+calculate();
+
+</script>
+
+</body>
+
+</html>
